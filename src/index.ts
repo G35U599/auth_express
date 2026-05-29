@@ -1,11 +1,11 @@
 import express from "express";
-import dotenv from "dotenv";
+import "dotenv/config";
 import { connectRedis } from "./config/redis";
-
-dotenv.config();
+import authRoutes from "./modules/auth/auth.routes";
 
 const app = express();
 app.use(express.json());
+app.use("/api/v1/auth", authRoutes);
 
 const PORT = process.env.PORT || 3000;
 
