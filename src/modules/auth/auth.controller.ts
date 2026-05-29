@@ -2,9 +2,14 @@ import type { Request, Response } from "express";
 import { loginService, registerService } from "./auth.service";
 import type { RegisterDto, LoginDto } from "./dto/auth.dto";
 import { AuthError } from "./utils/auth.errors";
+import { registerSchema } from "./dto/auth.schema";
 
 export const registerController = async (req: Request, res: Response) => {
   const { email, password, name }: RegisterDto = req.body;
+  const validationResult = registerSchema.safeParse({ email, password, name });
+  if (!validationResult.success) {
+    return res.status(400).json({ error: validationResult.error.flatten() });
+  }
   try {
     const newUser = await registerService({ email, password, name });
     res
