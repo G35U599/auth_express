@@ -1,3 +1,4 @@
+import { HashEncoding } from "./../../../node_modules/zod/src/v4/core/util";
 import prisma from "../../config/db";
 
 export const findUserByEmail = async (email: string) => {
@@ -16,3 +17,12 @@ export const createUser = async (data: {
   });
 };
 
+export const updateUserPasswordByEmail = async (
+  email: string,
+  hashedPassword: string,
+) => {
+  return prisma.user.update({
+    where: { email },
+    data: { password: hashedPassword },
+  });
+};

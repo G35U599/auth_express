@@ -1,11 +1,21 @@
 import bcrypt from "bcryptjs";
 import { LoginDto, RegisterDto } from "./dto/auth.dto";
-import { createUser, findUserByEmail } from "./auth.repository";
+import {
+  createUser,
+  findUserByEmail,
+  updateUserPasswordByEmail,
+} from "./auth.repository";
 import { AuthError } from "./utils/auth.errors";
 import { sanitizeUser } from "./utils/auth.utils";
 import { signAccessToken, signRefreshToken } from "./utils/jwt.utils";
 import redisClient from "../../config/redis";
+import { sendResetCode } from "./utils/mail.utils";
 
+/**
+ * Registro: validar que el email no exista, hashear la contraseña, guardar el usuario en la base de datos, devolver el usuario sin la contraseña
+ * Login: validar email y contraseña, generar access token y refresh token, guardar el refresh token en redis con un TTL, devolver ambos tokens
+ * Recuperar contraseña, generar un codigo de recuperacion, guardarlo en redis con un TTL, enviar el codigo por correo, validar el codigo y actualizar la contraseña
+ **/
 
 export const registerService = async ({
   email,
@@ -27,6 +37,10 @@ export const registerService = async ({
   return sanitizeUser(newUser);
 };
 
+/*
+ * Login: validar email y contraseña, generar access token y refresh token, guardar el refresh token en redis con un TTL, devolver ambos tokens
+ */
+
 export const loginService = async ({ email, password }: LoginDto) => {
   const user = await findUserByEmail(email);
   if (!user) {
@@ -44,4 +58,62 @@ export const loginService = async ({ email, password }: LoginDto) => {
     accessToken,
     refreshToken,
   };
+};
+
+/*
+ * Recuperar contraseña, generar un codigo de recuperacion, guardarlo en redis con un TTL, enviar el codigo por correo, validar el codigo y actualizar la contraseña
+ */
+
+const RESET_TTL_SECONDS = 10 * 60; // 10 minutos
+
+const generateCode = () =>
+  Math.floor(100000 + Math.random() * 900000).toString();
+
+export const forgotPasswordService = async (email: string) => {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const user = await findUserByEmail(normalizedEmail);
+
+  // Respuesta generica: si no existe, no hacemos nada
+  if (!user) return;
+  const code = generateCode();
+  await redisClient.setEx(`reset:${normalizedEmail}`, RESET_TTL_SECONDS, code);
+  await sendResetCode(normalizedEmail, code);
+};
+
+/**
+ * Validar el codigo y actualizar la contraseña
+ */
+
+export const resetPasswordService = async (
+  email: string,
+  code: string,
+  newPassword: string,
+) => {
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedCode = code.trim();
+  const storedCode = await redisClient.get(`reset:${normalizedEmail}`);
+
+  console.log("RESET_DEBUG", {
+    email: normalizedEmail,
+    storedCode,
+    receivedCode: normalizedCode,
+    storedLength: storedCode?.length,
+    receivedLength: normalizedCode?.length,
+  });
+
+  console.log("RESET_DEBUG_STR", {
+    emailRaw: JSON.stringify(normalizedEmail),
+    emailLen: normalizedEmail.length,
+    codeRaw: JSON.stringify(normalizedCode),
+    codeLen: normalizedCode.length,
+  });
+
+  if (!storedCode || storedCode !== normalizedCode) {
+    throw new AuthError("INVALID_RESET_CODE");
+  }
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  await updateUserPasswordByEmail(normalizedEmail, hashedPassword);
+
+  await redisClient.del(`reset:${normalizedEmail}`);
 };
