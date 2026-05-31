@@ -76,8 +76,12 @@ export const forgotPasswordService = async (email: string) => {
 
   // Respuesta generica: si no existe, no hacemos nada
   if (!user) return;
+
+  const codeKey = `reset:${normalizedEmail}`;
   const code = generateCode();
-  await redisClient.setEx(`reset:${normalizedEmail}`, RESET_TTL_SECONDS, code);
+
+  await redisClient.setEx(codeKey, RESET_TTL_SECONDS, code);
+
   await sendResetCode(normalizedEmail, code);
 };
 
@@ -93,21 +97,18 @@ export const resetPasswordService = async (
   const normalizedEmail = email.trim().toLowerCase();
   const normalizedCode = code.trim();
   const storedCode = await redisClient.get(`reset:${normalizedEmail}`);
+  const ttl = await redisClient.ttl(`reset:${normalizedEmail}`);
 
-  console.log("RESET_DEBUG", {
-    email: normalizedEmail,
+  console.log({
+    normalizedEmail,
+    normalizedCode,
     storedCode,
-    receivedCode: normalizedCode,
-    storedLength: storedCode?.length,
-    receivedLength: normalizedCode?.length,
+    ttl,
   });
 
-  console.log("RESET_DEBUG_STR", {
-    emailRaw: JSON.stringify(normalizedEmail),
-    emailLen: normalizedEmail.length,
-    codeRaw: JSON.stringify(normalizedCode),
-    codeLen: normalizedCode.length,
-  });
+  if (ttl < 0 || ttl > RESET_TTL_SECONDS) {
+    throw new AuthError("INVALID_RESET_CODE");
+  }
 
   if (!storedCode || storedCode !== normalizedCode) {
     throw new AuthError("INVALID_RESET_CODE");
