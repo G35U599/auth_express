@@ -1,4 +1,4 @@
-import redisClient from "../config/redis";
+import redisClient from "../../config/redis";
 
 type RateLimitInput = {
   redis: typeof redisClient;
@@ -21,18 +21,20 @@ export const rateLimit = async ({
   windowSeconds,
   max,
 }: RateLimitInput): Promise<RateLimitResult> => {
-  const attempts = await redis.incr(key);
+  // ✅ DESPUÉS — reemplaza todo eso con esto
+  const pipeline = redis.multi();
+  pipeline.incr(key);
+  pipeline.expire(key, windowSeconds, "NX"); // solo setea TTL si no tiene uno ya
+  pipeline.ttl(key);
 
-  if (attempts === 1) {
-    await redis.expire(key, windowSeconds);
-  }
-
-  const ttl = await redis.ttl(key);
+  const results = await pipeline.exec();
+  const attempts = results[0] as unknown as number;
+  const ttl = results[2] as unknown as number;
 
   return {
     allowed: attempts <= max,
     remaining: Math.max(0, max - attempts),
-    retryAfter: ttl > 0 ? ttl : undefined,
+    retryAfter: attempts > max && ttl > 0 ? ttl : undefined,
     attempts,
     ttl,
   };

@@ -7,7 +7,7 @@ import type { ForgotPasswordDto, ResetPasswordDto } from "./dto/auth.dto";
 import { forgotPasswordSchema, resetPasswordSchema } from "./dto/auth.schema";
 import { forgotPasswordService, resetPasswordService } from "./auth.service";
 import redisClient from "../../config/redis";
-import { rateLimit } from "../../utils/rate-limit";
+import { rateLimit } from "../../shared/utils/rate-limit";
 
 const FORGOT_RATE_LIMIT_WINDOW_SECONDS = 10 * 60; // 10 minutos
 const FORGOT_RATE_LIMIT_MAX = 3;
@@ -73,19 +73,30 @@ export const forgotPasswordController = async (req: Request, res: Response) => {
   const ip = req.ip ?? "unknown"; // fallback por si no se puede obtener la IP
 
   const rateKey = buildForgotRateKey(normalizedEmail, ip);
-  const { allowed, attempts, ttl } = await rateLimit({
+  const { allowed, attempts, ttl, retryAfter } = await rateLimit({
     redis: redisClient,
     key: rateKey,
     windowSeconds: FORGOT_RATE_LIMIT_WINDOW_SECONDS,
     max: FORGOT_RATE_LIMIT_MAX,
   });
 
-  console.log("FORGOT_RATE_DEBUG", { ip, rateKey, attempts, ttl });
+  console.log("FORGOT_RATE_DEBUG", {
+    ip,
+    rateKey,
+    allowed,
+    attempts,
+    ttl,
+    retryAfter,
+  });
 
   if (!allowed) {
-    return res
-      .status(429)
-      .json({ error: "Demasiadas solicitudes, intenta mas tarde" });
+    const retrySeconds = retryAfter ?? ttl;
+    res.setHeader("Retry-After", String(retrySeconds));
+
+    return res.status(429).json({
+      error: "Demasiadas solicitudes, intenta mas tarde",
+      retryAfter: retrySeconds,
+    });
   }
 
   try {
